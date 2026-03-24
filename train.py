@@ -37,8 +37,15 @@ X_test = scaler.transform(X_test)
 # ──────────────────────────────────────────────
 # 2. MLflow experiment
 # ──────────────────────────────────────────────
-MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
+
+if MLFLOW_TRACKING_URI:
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    print(f"MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+else:
+    # Fall back to local file-based tracking
+    print("No MLFLOW_TRACKING_URI set – using local ./mlruns")
+
 mlflow.set_experiment("fashion-mnist-classifier")
 
 N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 100))
@@ -71,11 +78,18 @@ with mlflow.start_run() as run:
     mlflow.sklearn.log_model(clf, "model")
 
     # ──────────────────────────────────────────
-    # 3. Export Run ID so the deploy job can read it
+    # 3. Export metadata so the deploy job can read it
     # ──────────────────────────────────────────
     with open("model_info.txt", "w") as f:
         f.write(run_id)
 
-    print(f"Run ID written to model_info.txt: {run_id}")
+    # Also write the tracking URI so check_threshold.py can use it
+    # even when running in a different job (it reads from model_info.txt
+    # but needs the same URI).
+    with open("mlflow_uri.txt", "w") as f:
+        f.write(mlflow.get_tracking_uri())
+
+    print(f"Run ID written to model_info.txt : {run_id}")
+    print(f"Tracking URI written to mlflow_uri.txt: {mlflow.get_tracking_uri()}")
 
 print("Training complete.")

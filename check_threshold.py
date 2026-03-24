@@ -4,6 +4,9 @@ check_threshold.py
 Reads the MLflow Run ID from model_info.txt, fetches the logged
 accuracy metric, and exits with a non-zero status if the accuracy
 is below the required threshold.
+
+When no remote MLflow server is configured, falls back to the local
+mlruns directory (written by train.py in the same job context).
 """
 
 import sys
@@ -12,6 +15,7 @@ import mlflow
 
 THRESHOLD = float(os.environ.get("ACCURACY_THRESHOLD", 0.85))
 MODEL_INFO_FILE = os.environ.get("MODEL_INFO_FILE", "model_info.txt")
+MLFLOW_URI_FILE = "mlflow_uri.txt"
 
 # ── Read Run ID ────────────────────────────────────────────────────────────────
 if not os.path.exists(MODEL_INFO_FILE):
@@ -28,8 +32,16 @@ if not run_id:
 print(f"Checking Run ID: {run_id}")
 
 # ── Connect to MLflow ──────────────────────────────────────────────────────────
-MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+# Priority: env var > mlflow_uri.txt file > default (local mlruns)
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
+
+if not MLFLOW_TRACKING_URI and os.path.exists(MLFLOW_URI_FILE):
+    with open(MLFLOW_URI_FILE, "r") as f:
+        MLFLOW_TRACKING_URI = f.read().strip()
+    print(f"[INFO] Using tracking URI from {MLFLOW_URI_FILE}: {MLFLOW_TRACKING_URI}")
+
+if MLFLOW_TRACKING_URI:
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
 client = mlflow.tracking.MlflowClient()
 
@@ -45,8 +57,8 @@ if accuracy is None:
     print(f"[ERROR] 'accuracy' metric not found in run {run_id}.")
     sys.exit(1)
 
-print(f"Accuracy from MLflow: {accuracy:.4f}")
-print(f"Required threshold  : {THRESHOLD}")
+print(f"Accuracy from MLflow : {accuracy:.4f}")
+print(f"Required threshold   : {THRESHOLD}")
 
 if accuracy < THRESHOLD:
     print(

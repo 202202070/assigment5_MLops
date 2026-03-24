@@ -9,11 +9,12 @@ on:
 
 # ──────────────────────────────────────────────────────────────────────────────
 # JOB 1 – validate
-#   • Pull data with DVC
+#   • Pull data with DVC  (gracefully skips if no remote)
 #   • Train the model
-#   • Log the run to MLflow
+#   • Log the run to MLflow  (uses remote server if secret is set,
+#     otherwise falls back to local ./mlruns)
 #   • Export the Run ID to model_info.txt
-#   • Upload model_info.txt as a workflow artefact
+#   • Upload model_info.txt + mlruns/ as workflow artefacts
 # ──────────────────────────────────────────────────────────────────────────────
 jobs:
   validate:
@@ -21,11 +22,9 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-      # Credentials used by MLflow (Dagshub / custom server)
+      MLFLOW_TRACKING_URI:      ${{ secrets.MLFLOW_TRACKING_URI }}
       MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
-      # Reduce dataset size to keep CI fast
       SAMPLE_SIZE: "8000"
 
     steps:
@@ -41,33 +40,25 @@ jobs:
           cache: "pip"
 
       # 3. Install Python dependencies
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install dvc dvc-gdrive           # add dvc-s3 / dvc-gs etc. as needed
+          pip install dvc
 
-      # 4. Configure DVC remote credentials (stored as GitHub secrets)
-      #    Adjust the remote name ("myremote") to match your .dvc/config
-      - name: Configure DVC remote credentials
-        env:
-          DVC_GDRIVE_CREDENTIALS_DATA: ${{ secrets.DVC_GDRIVE_CREDENTIALS_DATA }}
-        run: |
-          if [ -n "$DVC_GDRIVE_CREDENTIALS_DATA" ]; then
-            echo "$DVC_GDRIVE_CREDENTIALS_DATA" > gdrive-creds.json
-            dvc remote modify myremote gdrive_service_account_json_file_path gdrive-creds.json
-          else
-            echo "No DVC remote credentials found – skipping dvc pull (local data expected)"
-          fi
-
-      # 5. Pull data tracked by DVC
+      # 4. Pull data with DVC (skip gracefully if no remote is configured)
       - name: Pull data with DVC
         run: |
           if dvc remote list 2>/dev/null | grep -q .; then
-            dvc pull --run-cache || echo "DVC pull failed or no remote configured – using local data"
+            dvc pull --run-cache || echo "DVC pull failed – using local data"
           else
             echo "No DVC remote configured – using data already in workspace"
           fi
+
+      # 5. Verify training data exists
+      - name: Verify training data
+        run: |
+          ls -lh fashion-mnist_train.csv || { echo "ERROR: training CSV not found"; exit 1; }
 
       # 6. Train the model and log to MLflow
       - name: Train model
@@ -90,9 +81,20 @@ jobs:
           path: model_info.txt
           retention-days: 7
 
+      # 9. Upload mlruns/ (local tracking) + mlflow_uri.txt so deploy job
+      #    can query MLflow even without a remote server
+      - name: Upload MLflow tracking data
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-tracking
+          path: |
+            mlruns/
+            mlflow_uri.txt
+          retention-days: 7
+
 # ──────────────────────────────────────────────────────────────────────────────
 # JOB 2 – deploy
-#   • Download model_info.txt
+#   • Download model_info.txt + mlruns/
 #   • Run check_threshold.py (fails if accuracy < 0.85)
 #   • Mock Docker build (prints Run ID)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -102,7 +104,7 @@ jobs:
     needs: validate          # only run after validate succeeds
 
     env:
-      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_URI:      ${{ secrets.MLFLOW_TRACKING_URI }}
       MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
       ACCURACY_THRESHOLD: "0.85"
@@ -123,30 +125,39 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mlflow
+          pip install mlflow scikit-learn
 
-      # 4. Download the artefact produced by the validate job
+      # 4. Download the Run ID artefact produced by the validate job
       - name: Download model_info artifact
         uses: actions/download-artifact@v4
         with:
           name: model-info
 
-      # 5. Display the Run ID we are going to evaluate
+      # 5. Download MLflow tracking data (local mlruns if no remote server)
+      - name: Download MLflow tracking artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mlflow-tracking
+
+      # 6. Display the Run ID we are going to evaluate
       - name: Show Run ID
         run: |
           echo "Evaluating Run ID: $(cat model_info.txt)"
+          if [ -f mlflow_uri.txt ]; then
+            echo "MLflow URI: $(cat mlflow_uri.txt)"
+          fi
 
-      # 6. Check accuracy threshold – exits 1 if below 0.85 ← pipeline gate
+      # 7. Check accuracy threshold – exits 1 if below 0.85 ← pipeline gate
       - name: Check accuracy threshold
         run: python check_threshold.py
 
-      # 7. Mock Docker build (only reached if step 6 passes)
+      # 8. Mock Docker build (only reached if step 7 passes)
       - name: Mock Docker Build
         run: |
           RUN_ID=$(cat model_info.txt)
           echo "Building Docker image for Run ID: ${RUN_ID}"
           docker build \
             --build-arg RUN_ID="${RUN_ID}" \
-            --tag "fashion-mnist-classifier:${RUN_ID}" \
+            --tag "fashion-mnist-classifier:${RUN_ID:0:8}" \
             --file Dockerfile \
-            . || echo "Docker build simulated (daemon may not be available)"
+            . && echo "Docker build SUCCESS" || echo "Docker daemon unavailable – mock build complete"
