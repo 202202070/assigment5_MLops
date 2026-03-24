@@ -73,22 +73,12 @@ jobs:
           test -f model_info.txt || { echo "ERROR: model_info.txt missing"; exit 1; }
           echo "Run ID: $(cat model_info.txt)"
 
-      # Upload run ID so deploy job can verify it
+      # Upload model_info.txt (run_id + accuracy) for the deploy job
       - name: Upload model_info artifact
         uses: actions/upload-artifact@v4
         with:
           name: model-info
           path: model_info.txt
-          retention-days: 7
-
-      # Upload local MLflow tracking so deploy job can query without a server
-      - name: Upload MLflow tracking data
-        uses: actions/upload-artifact@v4
-        with:
-          name: mlflow-tracking
-          path: |
-            mlruns/
-            mlflow_uri.txt
           retention-days: 7
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,22 +111,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mlflow scikit-learn
+          pip install mlflow
 
       - name: Download model_info artifact
         uses: actions/download-artifact@v4
         with:
           name: model-info
 
-      - name: Download MLflow tracking artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: mlflow-tracking
-
-      - name: Show Run ID
+      - name: Show Run ID and Accuracy
         run: |
-          echo "Run ID  : $(cat model_info.txt)"
-          echo "MLflow  : $(cat mlflow_uri.txt 2>/dev/null || echo 'local')"
+          echo "Run ID   : $(sed -n '1p' model_info.txt)"
+          echo "Accuracy : $(sed -n '2p' model_info.txt)"
 
       # ── Pipeline Gate: fail here if accuracy < 0.85 ──────────────────────
       - name: Check accuracy threshold

@@ -1,87 +1,50 @@
 """
 check_threshold.py
 ──────────────────
-Reads the MLflow Run ID from model_info.txt, fetches the logged
-accuracy metric, and exits with a non-zero status if the accuracy
-is below the required threshold.
+Reads model_info.txt (produced by train.py in the validate job):
+  Line 1 – MLflow Run ID
+  Line 2 – accuracy score
 
-When no remote MLflow server is configured, falls back to the local
-mlruns directory (written by train.py in the same job context).
+Fails the pipeline (exit 1) if accuracy < ACCURACY_THRESHOLD.
+No MLflow server connection needed in the deploy job.
 """
 
 import sys
 import os
-import mlflow
 
-THRESHOLD = float(os.environ.get("ACCURACY_THRESHOLD", 0.85))
-MODEL_INFO_FILE = os.environ.get("MODEL_INFO_FILE", "model_info.txt")
-MLFLOW_URI_FILE = "mlflow_uri.txt"
+THRESHOLD         = float(os.environ.get("ACCURACY_THRESHOLD", 0.85))
+MODEL_INFO_FILE   = os.environ.get("MODEL_INFO_FILE", "model_info.txt")
 
-# ── Read Run ID ────────────────────────────────────────────────────────────────
+# ── Read model_info.txt ────────────────────────────────────────────────────────
 if not os.path.exists(MODEL_INFO_FILE):
     print(f"[ERROR] {MODEL_INFO_FILE} not found. Did the validate job succeed?")
     sys.exit(1)
 
 with open(MODEL_INFO_FILE, "r") as f:
-    run_id = f.read().strip()
+    lines = [l.strip() for l in f.readlines() if l.strip()]
 
-if not run_id:
-    print("[ERROR] model_info.txt is empty.")
+if len(lines) < 2:
+    print(f"[ERROR] {MODEL_INFO_FILE} must have 2 lines: run_id and accuracy.")
+    print(f"        Found: {lines}")
     sys.exit(1)
 
-print(f"Checking Run ID: {run_id}")
+run_id   = lines[0]
+accuracy = float(lines[1])
 
-# ── Connect to MLflow ──────────────────────────────────────────────────────────
-# Priority: env var (remote server) > mlruns/ artifact (local file tracking)
-MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
+print(f"Run ID           : {run_id}")
+print(f"Accuracy         : {accuracy:.4f}")
+print(f"Required threshold: {THRESHOLD}")
 
-if not MLFLOW_TRACKING_URI:
-    # Read what train.py wrote, but if it's a machine-specific SQLite path,
-    # replace it with the relative ./mlruns directory that was downloaded as an artifact.
-    if os.path.exists(MLFLOW_URI_FILE):
-        with open(MLFLOW_URI_FILE, "r") as f:
-            saved_uri = f.read().strip()
-        if saved_uri.startswith("sqlite:") or saved_uri.startswith("/"):
-            # Absolute path from a different runner – use the downloaded mlruns/ instead
-            MLFLOW_TRACKING_URI = "./mlruns"
-            print(f"[INFO] Saved URI was machine-specific ({saved_uri}), using ./mlruns artifact instead.")
-        else:
-            MLFLOW_TRACKING_URI = saved_uri
-            print(f"[INFO] Using tracking URI from {MLFLOW_URI_FILE}: {MLFLOW_TRACKING_URI}")
-    else:
-        MLFLOW_TRACKING_URI = "./mlruns"
-        print("[INFO] No mlflow_uri.txt found – defaulting to ./mlruns")
-
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-print(f"[INFO] MLflow tracking URI set to: {MLFLOW_TRACKING_URI}")
-
-
-client = mlflow.tracking.MlflowClient()
-
-try:
-    run = client.get_run(run_id)
-except Exception as e:
-    print(f"[ERROR] Could not retrieve run {run_id} from MLflow: {e}")
-    sys.exit(1)
-
-accuracy = run.data.metrics.get("accuracy")
-
-if accuracy is None:
-    print(f"[ERROR] 'accuracy' metric not found in run {run_id}.")
-    sys.exit(1)
-
-print(f"Accuracy from MLflow : {accuracy:.4f}")
-print(f"Required threshold   : {THRESHOLD}")
-
+# ── Threshold gate ────────────────────────────────────────────────────────────
 if accuracy < THRESHOLD:
     print(
-        f"[FAIL] Accuracy {accuracy:.4f} is BELOW the threshold {THRESHOLD}. "
-        "Deployment blocked."
+        f"\n[FAIL] Accuracy {accuracy:.4f} is BELOW the threshold {THRESHOLD}.\n"
+        "       Deployment blocked."
     )
     sys.exit(1)
 
 print(
-    f"[PASS] Accuracy {accuracy:.4f} meets the threshold {THRESHOLD}. "
-    "Proceeding to deployment."
+    f"\n[PASS] Accuracy {accuracy:.4f} meets the threshold {THRESHOLD}.\n"
+    "       Proceeding to deployment."
 )
 sys.exit(0)

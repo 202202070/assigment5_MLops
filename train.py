@@ -60,8 +60,9 @@ else:
 
 mlflow.set_experiment("bank-deposit-classifier")
 
-N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 200))
-MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 20))
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 3))
+MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 2))
+
 
 
 
@@ -92,14 +93,15 @@ with mlflow.start_run() as run:
     mlflow.sklearn.log_model(clf, "model")
 
     # ── Export artifacts for the deploy job ──────────────────────────────────
+    # model_info.txt:  line 1 = Run ID,  line 2 = accuracy
     with open("model_info.txt", "w") as f:
-        f.write(run_id)
+        f.write(run_id + "\n")
+        f.write(str(accuracy) + "\n")
 
-    with open("mlflow_uri.txt", "w") as f:
-        f.write(mlflow.get_tracking_uri())
+    print("model_info.txt written:")
+    print("  Run ID   -> " + run_id)
+    print("  Accuracy -> " + str(round(accuracy, 4)))
 
-    print("model_info.txt  -> " + run_id)
-    print("mlflow_uri.txt  -> " + mlflow.get_tracking_uri())
 
 
 print("Training complete.")
