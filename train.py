@@ -41,8 +41,9 @@ MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:50
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 mlflow.set_experiment("fashion-mnist-classifier")
 
-N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 100))
-MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 15))
+# Deliberately weak parameters to force accuracy < 0.85 (for the FAIL screenshot)
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 5))
+MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 3))
 
 with mlflow.start_run() as run:
     run_id = run.info.run_id
