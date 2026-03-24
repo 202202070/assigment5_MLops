@@ -1,0 +1,4 @@
+outs:
+- md5: placeholder-replace-after-dvc-add
+  size: 133047193
+  path: fashion-mnist_train.csv

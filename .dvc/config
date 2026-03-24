@@ -1,0 +1,7 @@
+[core]
+    autostage = true
+# Uncomment and configure your remote storage:
+# [remote "myremote"]
+#     url = gdrive://your-gdrive-folder-id
+#     # or for S3:
+#     # url = s3://your-bucket/fashion-mnist-data
