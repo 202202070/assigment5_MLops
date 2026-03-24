@@ -6,72 +6,68 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import LabelEncoder
 
-# ──────────────────────────────────────────────
-# 1. Load data
-#    Priority: env $DATA_PATH > fashion-mnist_train.csv > synthetic fallback
-# ──────────────────────────────────────────────
-DATA_PATH = os.environ.get("DATA_PATH", "fashion-mnist_train.csv")
-SAMPLE_SIZE = int(os.environ.get("SAMPLE_SIZE", 10000))
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Load data   (DVC pulls bank.csv from DagsHub)
+# ─────────────────────────────────────────────────────────────────────────────
+DATA_PATH = os.environ.get("DATA_PATH", "bank.csv")
 
 if os.path.exists(DATA_PATH):
-    print(f"Loading real dataset from: {DATA_PATH}")
+    print(f"Loading dataset: {DATA_PATH}")
     df = pd.read_csv(DATA_PATH)
-    X = df.drop(columns=["label"]).values
-    y = df["label"].values
-
-    if len(X) > SAMPLE_SIZE:
-        rng = np.random.default_rng(42)
-        idx = rng.choice(len(X), SAMPLE_SIZE, replace=False)
-        X, y = X[idx], y[idx]
 else:
-    # ── Synthetic Fashion-MNIST-like data ──────────────────────────────────
-    print(
-        f"[INFO] {DATA_PATH} not found – generating synthetic 784-feature, "
-        f"10-class dataset ({SAMPLE_SIZE} samples) for CI demonstration."
-    )
+    # Synthetic fallback: 10-feature binary classification
+    print(f"[INFO] {DATA_PATH} not found – generating synthetic bank-like data.")
     rng = np.random.default_rng(42)
-    X = rng.integers(0, 256, size=(SAMPLE_SIZE, 784)).astype(float)
-    y = rng.integers(0, 10, size=SAMPLE_SIZE)
+    n = 11162
+    df = pd.DataFrame(rng.integers(0, 100, (n, 10)),
+                      columns=[f"f{i}" for i in range(10)])
+    df["deposit"] = rng.choice(["yes", "no"], n)
 
-print(f"Dataset shape: X={X.shape}, y={y.shape}")
+print(f"Dataset shape: {df.shape}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. Pre-process   (encode all categorical columns)
+# ─────────────────────────────────────────────────────────────────────────────
+TARGET = "deposit"
+le = LabelEncoder()
+
+for col in df.select_dtypes(include="object").columns:
+    df[col] = le.fit_transform(df[col].astype(str))
+
+X = df.drop(columns=[TARGET]).values
+y = df[TARGET].values
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
-
-# ──────────────────────────────────────────────
-# 2. MLflow experiment
-# ──────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. MLflow experiment
+# ─────────────────────────────────────────────────────────────────────────────
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
-
 if MLFLOW_TRACKING_URI:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    print(f"MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+    print(f"MLflow URI: {MLFLOW_TRACKING_URI}")
 else:
-    print("No MLFLOW_TRACKING_URI set – using local ./mlruns")
+    print("No MLFLOW_TRACKING_URI – using local ./mlruns")
 
-mlflow.set_experiment("fashion-mnist-classifier")
+mlflow.set_experiment("bank-deposit-classifier")
 
-N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 100))
-MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 15))
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 3))
+MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 2))
+
 
 with mlflow.start_run() as run:
     run_id = run.info.run_id
-    print(f"MLflow Run ID: {run_id}")
+    print(f"Run ID: {run_id}")
 
-    # Log hyper-parameters
-    mlflow.log_param("n_estimators", N_ESTIMATORS)
-    mlflow.log_param("max_depth", MAX_DEPTH)
-    mlflow.log_param("sample_size", SAMPLE_SIZE)
-    mlflow.log_param("synthetic_data", not os.path.exists(DATA_PATH))
+    mlflow.log_param("n_estimators",  N_ESTIMATORS)
+    mlflow.log_param("max_depth",     MAX_DEPTH)
+    mlflow.log_param("dataset",       DATA_PATH)
+    mlflow.log_param("train_samples", len(X_train))
 
-    # Train
     clf = RandomForestClassifier(
         n_estimators=N_ESTIMATORS,
         max_depth=MAX_DEPTH,
@@ -80,24 +76,22 @@ with mlflow.start_run() as run:
     )
     clf.fit(X_train, y_train)
 
-    # Evaluate
-    y_pred = clf.predict(X_test)
+    y_pred   = clf.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
     print(f"Accuracy: {accuracy:.4f}")
 
     mlflow.log_metric("accuracy", accuracy)
     mlflow.sklearn.log_model(clf, "model")
 
-    # ──────────────────────────────────────────
-    # 3. Export metadata so the deploy job can read it
-    # ──────────────────────────────────────────
+    # ── Export artifacts for the deploy job ──────────────────────────────────
     with open("model_info.txt", "w") as f:
         f.write(run_id)
 
     with open("mlflow_uri.txt", "w") as f:
         f.write(mlflow.get_tracking_uri())
 
-    print(f"Run ID written to model_info.txt : {run_id}")
-    print(f"Tracking URI written to mlflow_uri.txt: {mlflow.get_tracking_uri()}")
+    print("model_info.txt  -> " + run_id)
+    print("mlflow_uri.txt  -> " + mlflow.get_tracking_uri())
+
 
 print("Training complete.")

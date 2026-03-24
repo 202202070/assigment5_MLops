@@ -5,7 +5,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-*.whl
 .venv/
 venv/
 env/
@@ -14,11 +13,13 @@ env/
 mlruns/
 mlartifacts/
 
-# DVC
-/tmp/
+# DVC-tracked data files (use .dvc pointers instead)
+bank.csv
+fashion-mnist_train.csv
 
-# Model outputs
+# Pipeline outputs
 model_info.txt
+mlflow_uri.txt
 *.pkl
 *.joblib
 
@@ -35,3 +36,6 @@ Thumbs.db
 
 # Secrets
 .env
+.dvc/tmp/
+.dvc/cache/
+.dvc/config.local
