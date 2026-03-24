@@ -60,8 +60,9 @@ else:
 
 mlflow.set_experiment("bank-deposit-classifier")
 
-N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 3))
-MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 2))
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 200))
+MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 20))
+
 
 
 
