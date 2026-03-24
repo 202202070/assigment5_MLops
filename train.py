@@ -51,12 +51,18 @@ if MLFLOW_TRACKING_URI:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     print(f"MLflow URI: {MLFLOW_TRACKING_URI}")
 else:
-    print("No MLFLOW_TRACKING_URI – using local ./mlruns")
+    # Force file-based tracking so mlruns/ is self-contained and
+    # can be passed as a workflow artifact to the deploy job.
+    mlflow.set_tracking_uri("./mlruns")
+    print("No MLFLOW_TRACKING_URI – using file-based ./mlruns")
+
+
 
 mlflow.set_experiment("bank-deposit-classifier")
 
-N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 3))
-MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 2))
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 200))
+MAX_DEPTH    = int(os.environ.get("MAX_DEPTH", 20))
+
 
 
 

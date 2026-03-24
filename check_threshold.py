@@ -32,16 +32,29 @@ if not run_id:
 print(f"Checking Run ID: {run_id}")
 
 # ── Connect to MLflow ──────────────────────────────────────────────────────────
-# Priority: env var > mlflow_uri.txt file > default (local mlruns)
+# Priority: env var (remote server) > mlruns/ artifact (local file tracking)
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
 
-if not MLFLOW_TRACKING_URI and os.path.exists(MLFLOW_URI_FILE):
-    with open(MLFLOW_URI_FILE, "r") as f:
-        MLFLOW_TRACKING_URI = f.read().strip()
-    print(f"[INFO] Using tracking URI from {MLFLOW_URI_FILE}: {MLFLOW_TRACKING_URI}")
+if not MLFLOW_TRACKING_URI:
+    # Read what train.py wrote, but if it's a machine-specific SQLite path,
+    # replace it with the relative ./mlruns directory that was downloaded as an artifact.
+    if os.path.exists(MLFLOW_URI_FILE):
+        with open(MLFLOW_URI_FILE, "r") as f:
+            saved_uri = f.read().strip()
+        if saved_uri.startswith("sqlite:") or saved_uri.startswith("/"):
+            # Absolute path from a different runner – use the downloaded mlruns/ instead
+            MLFLOW_TRACKING_URI = "./mlruns"
+            print(f"[INFO] Saved URI was machine-specific ({saved_uri}), using ./mlruns artifact instead.")
+        else:
+            MLFLOW_TRACKING_URI = saved_uri
+            print(f"[INFO] Using tracking URI from {MLFLOW_URI_FILE}: {MLFLOW_TRACKING_URI}")
+    else:
+        MLFLOW_TRACKING_URI = "./mlruns"
+        print("[INFO] No mlflow_uri.txt found – defaulting to ./mlruns")
 
-if MLFLOW_TRACKING_URI:
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+print(f"[INFO] MLflow tracking URI set to: {MLFLOW_TRACKING_URI}")
+
 
 client = mlflow.tracking.MlflowClient()
 
