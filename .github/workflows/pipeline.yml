@@ -44,9 +44,16 @@ jobs:
         env:
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
+          if [ -z "$DAGSHUB_TOKEN" ]; then
+            echo "ERROR: DAGSHUB_TOKEN secret is not set in GitHub repository settings."
+            echo "Go to: Settings > Secrets > Actions > New repository secret"
+            echo "Name: DAGSHUB_TOKEN   Value: your DagsHub access token"
+            exit 1
+          fi
           dvc remote modify dagshub --local auth basic
           dvc remote modify dagshub --local user 202202070
           dvc remote modify dagshub --local password "$DAGSHUB_TOKEN"
+          echo "DVC remote configured with DagsHub credentials."
 
       # Pull bank.csv from DagsHub DVC remote
       - name: Pull data with DVC
